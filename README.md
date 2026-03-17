@@ -304,11 +304,14 @@ The first time you use PDF annotation features, the necessary tools will be auto
 
 ### 🧠 Semantic Search Tools
 - `zotero_semantic_search`: AI-powered similarity search with embedding models
+- `zotero_semantic_search_abstracts`: Semantic search focused on paper abstracts for topic/methodology discovery
 - `zotero_update_search_database`: Manually update the semantic search database
 - `zotero_get_search_database_status`: Check database status and configuration
 
 ### 🔍 Search Tools
-- `zotero_search_items`: Search your library by keywords
+- `zotero_search_items`: Search your library by keywords (with relevance ranking)
+- `zotero_search_by_title`: Search by title with relevance ranking
+- `zotero_search_by_author`: Search by author/creator name with relevance ranking
 - `zotero_advanced_search`: Perform complex searches with multiple criteria
 - `zotero_get_collections`: List collections
 - `zotero_get_collection_items`: Get items in a collection
@@ -319,6 +322,7 @@ The first time you use PDF annotation features, the necessary tools will be auto
 ### 📚 Content Tools
 - `zotero_get_item_metadata`: Get detailed metadata (supports BibTeX export via `format="bibtex"`)
 - `zotero_get_item_fulltext`: Get full text content
+- `zotero_get_item_pdf`: Download PDF files (base64 or file path)
 - `zotero_get_item_children`: Get attachments and notes
 
 ### 📝 Annotation & Notes Tools

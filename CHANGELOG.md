@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-03-16
+
+### Added
+- `zotero_search_by_title`: Title-focused search with relevance ranking.
+- `zotero_search_by_author`: Author-focused search with relevance ranking.
+- `zotero_semantic_search_abstracts`: Semantic search focused on paper abstracts for topic/methodology discovery.
+- `zotero_get_item_pdf`: Download PDF files as base64-encoded content or saved to a file path.
+- Relevance scoring module for ranking search results by text match quality, creator match, and recency.
+- Existing `zotero_search_items` now ranks results by relevance and displays relevance scores.
+- Abstracts collection in ChromaDB for abstract-specific semantic search.
+
 ## [0.1.4] - 2026-03-09
 
 ### Added
