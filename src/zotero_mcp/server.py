@@ -31,6 +31,7 @@ from zotero_mcp.client import (
 import requests
 
 from zotero_mcp.utils import format_creators, clean_html, is_local_mode
+from zotero_mcp.relevance import rank_results
 
 @asynccontextmanager
 async def server_lifespan(server: FastMCP):
@@ -131,10 +132,16 @@ def search_items(
         if not results:
             return f"No items found matching query: '{query}'{tag_condition_str}"
 
+        # Rank results by relevance
+        if qmode == "everything":
+            ranked = rank_results(query, results, search_fields=["title", "creators", "abstractNote"])
+        else:
+            ranked = rank_results(query, results, search_fields=["title", "creators"])
+
         # Format results as markdown
         output = [f"# Search Results for '{query}'", f"{tag_condition_str}", ""]
 
-        for i, item in enumerate(results, 1):
+        for i, (item, score) in enumerate(ranked, 1):
             data = item.get("data", {})
             title = data.get("title", "Untitled")
             item_type = data.get("itemType", "unknown")
@@ -147,6 +154,7 @@ def search_items(
 
             # Build the formatted entry
             output.append(f"## {i}. {title}")
+            output.append(f"**Relevance:** {score:.0%}")
             output.append(f"**Type:** {item_type}")
             output.append(f"**Item Key:** {key}")
             output.append(f"**Date:** {date}")
@@ -171,6 +179,142 @@ def search_items(
     except Exception as e:
         ctx.error(f"Error searching Zotero: {str(e)}")
         return f"Error searching Zotero: {str(e)}"
+
+@mcp.tool(name="zotero_search_by_title",
+          description="Search for items by title. Results ranked by relevance.")
+def search_by_title(query: str, limit: int | str | None = 10, *, ctx: Context) -> str:
+    """
+    Search for items by title with relevance ranking.
+
+    Args:
+        query: Title search query
+        limit: Maximum number of results to return
+        ctx: MCP context
+
+    Returns:
+        Markdown-formatted search results ranked by title relevance
+    """
+    try:
+        if not query.strip():
+            return "Error: Search query cannot be empty"
+
+        ctx.info(f"Searching Zotero by title for '{query}'")
+        zot = get_zotero_client()
+
+        if isinstance(limit, str):
+            limit = int(limit)
+
+        zot.add_parameters(q=query, qmode="titleCreatorYear", itemType="-attachment", limit=limit)
+        results = zot.items()
+
+        if not results:
+            return f"No items found matching title: '{query}'"
+
+        ranked = rank_results(query, results, search_fields=["title"])
+
+        output = [f"# Title Search Results for '{query}'", ""]
+
+        for i, (item, score) in enumerate(ranked, 1):
+            data = item.get("data", {})
+            title = data.get("title", "Untitled")
+            item_type = data.get("itemType", "unknown")
+            date = data.get("date", "No date")
+            key = item.get("key", "")
+            creators = data.get("creators", [])
+            creators_str = format_creators(creators)
+
+            output.append(f"## {i}. {title}")
+            output.append(f"**Relevance:** {score:.0%}")
+            output.append(f"**Type:** {item_type}")
+            output.append(f"**Item Key:** {key}")
+            output.append(f"**Date:** {date}")
+            output.append(f"**Authors:** {creators_str}")
+
+            if abstract := data.get("abstractNote"):
+                abstract_snippet = abstract[:200] + "..." if len(abstract) > 200 else abstract
+                output.append(f"**Abstract:** {abstract_snippet}")
+
+            if tags := data.get("tags"):
+                tag_list = [f"`{tag['tag']}`" for tag in tags]
+                if tag_list:
+                    output.append(f"**Tags:** {' '.join(tag_list)}")
+
+            output.append("")
+
+        return "\n".join(output)
+
+    except Exception as e:
+        ctx.error(f"Error searching by title: {str(e)}")
+        return f"Error searching by title: {str(e)}"
+
+
+@mcp.tool(name="zotero_search_by_author",
+          description="Search for items by author/creator name. Results ranked by relevance.")
+def search_by_author(query: str, limit: int | str | None = 10, *, ctx: Context) -> str:
+    """
+    Search for items by author name with relevance ranking.
+
+    Args:
+        query: Author name search query
+        limit: Maximum number of results to return
+        ctx: MCP context
+
+    Returns:
+        Markdown-formatted search results ranked by author relevance
+    """
+    try:
+        if not query.strip():
+            return "Error: Search query cannot be empty"
+
+        ctx.info(f"Searching Zotero by author for '{query}'")
+        zot = get_zotero_client()
+
+        if isinstance(limit, str):
+            limit = int(limit)
+
+        zot.add_parameters(q=query, qmode="titleCreatorYear", itemType="-attachment", limit=limit)
+        results = zot.items()
+
+        if not results:
+            return f"No items found matching author: '{query}'"
+
+        ranked = rank_results(query, results, search_fields=["creators"])
+
+        output = [f"# Author Search Results for '{query}'", ""]
+
+        for i, (item, score) in enumerate(ranked, 1):
+            data = item.get("data", {})
+            title = data.get("title", "Untitled")
+            item_type = data.get("itemType", "unknown")
+            date = data.get("date", "No date")
+            key = item.get("key", "")
+            creators = data.get("creators", [])
+            creators_str = format_creators(creators)
+
+            output.append(f"## {i}. {title}")
+            output.append(f"**Relevance:** {score:.0%}")
+            output.append(f"**Type:** {item_type}")
+            output.append(f"**Item Key:** {key}")
+            output.append(f"**Date:** {date}")
+            output.append(f"**Authors:** {creators_str}")
+
+            if abstract := data.get("abstractNote"):
+                abstract_snippet = abstract[:200] + "..." if len(abstract) > 200 else abstract
+                output.append(f"**Abstract:** {abstract_snippet}")
+
+            if tags := data.get("tags"):
+                tag_list = [f"`{tag['tag']}`" for tag in tags]
+                if tag_list:
+                    output.append(f"**Tags:** {' '.join(tag_list)}")
+
+            output.append("")
+
+        return "\n".join(output)
+
+    except Exception as e:
+        ctx.error(f"Error searching by author: {str(e)}")
+        return f"Error searching by author: {str(e)}"
+
 
 @mcp.tool(
     name="zotero_search_by_tag",
@@ -376,6 +520,91 @@ def get_item_fulltext(
     except Exception as e:
         ctx.error(f"Error fetching item full text: {str(e)}")
         return f"Error fetching item full text: {str(e)}"
+
+
+@mcp.tool(name="zotero_get_item_pdf",
+          description="Download the PDF file for a Zotero item. Returns base64-encoded PDF content or saves to a file path.")
+def get_item_pdf(
+    item_key: str,
+    output_mode: Literal["base64", "path"] = "base64",
+    *,
+    ctx: Context
+) -> str:
+    """
+    Download the PDF file for a Zotero item.
+
+    Args:
+        item_key: Zotero item key/ID
+        output_mode: "base64" returns base64-encoded content, "path" saves to a temp file
+        ctx: MCP context
+
+    Returns:
+        JSON string with PDF details and content/path
+    """
+    try:
+        ctx.info(f"Fetching PDF for item {item_key}")
+        zot = get_zotero_client()
+
+        item = zot.item(item_key)
+        if not item:
+            return f"No item found with key: {item_key}"
+
+        attachment = get_attachment_details(zot, item)
+        if not attachment:
+            return f"No attachment found for item: {item_key}"
+
+        if attachment.content_type != "application/pdf":
+            return f"Attachment is not a PDF (type: {attachment.content_type}). Use zotero_get_item_fulltext instead."
+
+        import base64
+        import tempfile
+
+        if output_mode == "base64":
+            with tempfile.TemporaryDirectory() as tmpdir:
+                filename = attachment.filename or f"{attachment.key}.pdf"
+                zot.dump(attachment.key, filename=filename, path=tmpdir)
+                file_path = os.path.join(tmpdir, filename)
+
+                if not os.path.exists(file_path):
+                    return "Error: PDF download failed."
+
+                size_bytes = os.path.getsize(file_path)
+                if size_bytes > 100 * 1024 * 1024:
+                    return (
+                        f"PDF is too large for base64 mode ({size_bytes / 1024 / 1024:.1f} MB). "
+                        f"Use output_mode='path' instead."
+                    )
+
+                with open(file_path, "rb") as f:
+                    data = base64.b64encode(f.read()).decode("ascii")
+
+                return json.dumps({
+                    "filename": filename,
+                    "content_type": "application/pdf",
+                    "size_bytes": size_bytes,
+                    "data": data,
+                })
+
+        else:  # path mode
+            tmpdir = tempfile.mkdtemp(prefix="zotero-mcp-")
+            filename = attachment.filename or f"{attachment.key}.pdf"
+            zot.dump(attachment.key, filename=filename, path=tmpdir)
+            file_path = os.path.join(tmpdir, filename)
+
+            if not os.path.exists(file_path):
+                return "Error: PDF download failed."
+
+            size_bytes = os.path.getsize(file_path)
+            return json.dumps({
+                "filename": filename,
+                "content_type": "application/pdf",
+                "size_bytes": size_bytes,
+                "path": file_path,
+            })
+
+    except Exception as e:
+        ctx.error(f"Error fetching PDF: {str(e)}")
+        return f"Error fetching PDF: {str(e)}"
 
 
 @mcp.tool(
@@ -2679,6 +2908,105 @@ def semantic_search(
     except Exception as e:
         ctx.error(f"Error in semantic search: {str(e)}")
         return f"Error in semantic search: {str(e)}"
+
+
+@mcp.tool(name="zotero_semantic_search_abstracts",
+          description="Semantic search focused on paper abstracts. Best for finding papers by research topic or methodology.")
+def semantic_search_abstracts(
+    query: str,
+    limit: int = 10,
+    filters: dict[str, str] | str | None = None,
+    *,
+    ctx: Context
+) -> str:
+    """
+    Perform semantic search focused on paper abstracts.
+
+    Args:
+        query: Search query - concepts, topics, or natural language descriptions
+        limit: Maximum number of results to return (default: 10)
+        filters: Optional metadata filters as dict or JSON string
+        ctx: MCP context
+
+    Returns:
+        Markdown-formatted search results with similarity scores
+    """
+    try:
+        if not query.strip():
+            return "Error: Search query cannot be empty"
+
+        if filters is not None:
+            if isinstance(filters, str):
+                try:
+                    filters = json.loads(filters)
+                except json.JSONDecodeError as e:
+                    return f"Error: Invalid JSON in filters parameter: {str(e)}"
+            if not isinstance(filters, dict):
+                return "Error: filters parameter must be a dictionary or JSON string."
+            if "itemType" in filters:
+                filters["item_type"] = filters.pop("itemType")
+
+        ctx.info(f"Performing abstract semantic search for: '{query}'")
+
+        from zotero_mcp.semantic_search import create_semantic_search
+        config_path = Path.home() / ".config" / "zotero-mcp" / "config.json"
+        search = create_semantic_search(str(config_path))
+        results = search.search_abstracts(query=query, limit=limit, filters=filters)
+
+        if results.get("error"):
+            return f"Abstract semantic search error: {results['error']}"
+
+        search_results = results.get("results", [])
+        if not search_results:
+            return f"No semantically similar abstracts found for query: '{query}'"
+
+        output = [f"# Abstract Semantic Search Results for '{query}'", ""]
+        output.append(f"Found {len(search_results)} similar items:")
+        output.append("")
+
+        for i, result in enumerate(search_results, 1):
+            similarity_score = result.get("similarity_score", 0)
+            zotero_item = result.get("zotero_item", {})
+
+            if zotero_item:
+                data = zotero_item.get("data", {})
+                title = data.get("title", "Untitled")
+                item_type = data.get("itemType", "unknown")
+                key = result.get("item_key", "")
+                creators = data.get("creators", [])
+                creators_str = format_creators(creators)
+
+                output.append(f"## {i}. {title}")
+                output.append(f"**Similarity Score:** {similarity_score:.3f}")
+                output.append(f"**Type:** {item_type}")
+                output.append(f"**Item Key:** {key}")
+                output.append(f"**Authors:** {creators_str}")
+
+                if date := data.get("date"):
+                    output.append(f"**Date:** {date}")
+
+                if abstract := data.get("abstractNote"):
+                    abstract_snippet = abstract[:200] + "..." if len(abstract) > 200 else abstract
+                    output.append(f"**Abstract:** {abstract_snippet}")
+
+                if tags := data.get("tags"):
+                    tag_list = [f"`{tag['tag']}`" for tag in tags]
+                    if tag_list:
+                        output.append(f"**Tags:** {' '.join(tag_list)}")
+
+                output.append("")
+            else:
+                output.append(f"## {i}. Item {result.get('item_key', 'Unknown')}")
+                output.append(f"**Similarity Score:** {similarity_score:.3f}")
+                if error := result.get("error"):
+                    output.append(f"**Error:** {error}")
+                output.append("")
+
+        return "\n".join(output)
+
+    except Exception as e:
+        ctx.error(f"Error in abstract semantic search: {str(e)}")
+        return f"Error in abstract semantic search: {str(e)}"
 
 
 @mcp.tool(

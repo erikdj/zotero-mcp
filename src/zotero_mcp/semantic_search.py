@@ -66,6 +66,8 @@ def _truncate_to_tokens(text: str, max_tokens: int = 8000) -> str:
 class ZoteroSemanticSearch:
     """Semantic search interface for Zotero libraries using ChromaDB."""
 
+    abstracts_collection_name = "zotero_abstracts"
+
     def __init__(self,
                  chroma_client: ChromaClient | None = None,
                  config_path: str | None = None,
@@ -133,6 +135,34 @@ class ZoteroSemanticSearch:
                 json.dump(full_config, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving update config: {e}")
+
+    def _get_abstracts_chroma_client(self) -> ChromaClient:
+        """Get or create a ChromaClient for the abstracts collection.
+
+        Uses the same embedding configuration as the main chroma client
+        but targets the abstracts-only collection.
+        """
+        if not hasattr(self, '_abstracts_chroma_client') or self._abstracts_chroma_client is None:
+            # Reuse the same config from the main chroma client
+            self._abstracts_chroma_client = ChromaClient(
+                collection_name=self.abstracts_collection_name,
+                persist_directory=self.chroma_client.persist_directory,
+                embedding_model=self.chroma_client.embedding_model,
+                embedding_config=self.chroma_client.embedding_config,
+            )
+        return self._abstracts_chroma_client
+
+    def _create_abstract_text(self, item: dict[str, Any]) -> str:
+        """
+        Return only the abstract text from a Zotero item.
+
+        Args:
+            item: Zotero item dictionary
+
+        Returns:
+            The abstractNote field, or empty string if not present.
+        """
+        return item.get("data", {}).get("abstractNote", "")
 
     def _create_document_text(self, item: dict[str, Any]) -> str:
         """
@@ -652,6 +682,36 @@ class ZoteroSemanticSearch:
                 except Exception:
                     pass
 
+            # Also update abstracts collection
+            abstracts_client = self._get_abstracts_chroma_client()
+            abstract_docs = []
+            abstract_metas = []
+            abstract_ids = []
+            for item in all_items:
+                item_key = item.get("key", "")
+                if not item_key:
+                    continue
+                abstract_text = self._create_abstract_text(item)
+                if not abstract_text.strip():
+                    continue
+                abstract_text = _truncate_to_tokens(abstract_text, max_tokens=abstracts_client.embedding_max_tokens)
+                metadata = self._create_metadata(item)
+                abstract_docs.append(abstract_text)
+                abstract_metas.append(metadata)
+                abstract_ids.append(item_key)
+
+            if abstract_docs:
+                # Batch upsert
+                batch_size = 50
+                for i in range(0, len(abstract_docs), batch_size):
+                    batch_end = i + batch_size
+                    abstracts_client.upsert_documents(
+                        abstract_docs[i:batch_end],
+                        abstract_metas[i:batch_end],
+                        abstract_ids[i:batch_end],
+                    )
+                stats["abstracts_indexed"] = len(abstract_docs)
+
             # Update last update time
             self.update_config["last_update"] = datetime.now().isoformat()
             self._save_update_config()
@@ -778,6 +838,53 @@ class ZoteroSemanticSearch:
 
         except Exception as e:
             logger.error(f"Error performing semantic search: {e}")
+            return {
+                "query": query,
+                "limit": limit,
+                "filters": filters,
+                "results": [],
+                "total_found": 0,
+                "error": str(e)
+            }
+
+    def search_abstracts(self,
+                         query: str,
+                         limit: int = 10,
+                         filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        """
+        Perform semantic search over Zotero item abstracts only.
+
+        Args:
+            query: Search query text
+            limit: Maximum number of results to return
+            filters: Optional metadata filters
+
+        Returns:
+            Search results with Zotero item details
+        """
+        try:
+            abstracts_client = self._get_abstracts_chroma_client()
+
+            # Perform semantic search against abstracts collection
+            results = abstracts_client.search(
+                query_texts=[query],
+                n_results=limit,
+                where=filters
+            )
+
+            # Enrich results with full Zotero item data
+            enriched_results = self._enrich_search_results(results, query)
+
+            return {
+                "query": query,
+                "limit": limit,
+                "filters": filters,
+                "results": enriched_results,
+                "total_found": len(enriched_results)
+            }
+
+        except Exception as e:
+            logger.error(f"Error performing abstract semantic search: {e}")
             return {
                 "query": query,
                 "limit": limit,
